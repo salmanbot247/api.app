@@ -13,41 +13,47 @@ bot = telebot.TeleBot(TOKEN)
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "☠️ **SECRET SCANNER BOT ACTIVATED** ☠️\n\nMujhe kisi app ka link bhejein. Main code ko scan karke usme se API Keys aur Khufiya Links nikal kar aapko text karunga!")
+    bot.reply_to(message, "☠️ **UI BLUEPRINT EXTRACTOR ACTIVATED** ☠️\n\nMujhe App ka link bhejein. Main uske saare Screens se Buttons, Inputs aur unke IDs (Locators) nikal kar aapko de dunga!")
 
-# The Scanning Engine (Jo secrets dhoondega)
-def scan_for_secrets(directory):
-    secrets_found = set()
+# 🔍 The Extractor Engine (Jo UI Elements dhoondega)
+def extract_ui_elements(directory):
+    ui_data = []
     
-    # Regex Patterns (In shakal ke passwords aur keys dhoondni hain)
-    patterns = {
-        "Google API Key": r'AIza[0-9A-Za-z\-_]{35}',
-        "AWS Access Key": r'AKIA[0-9A-Z]{16}',
-        "Firebase DB": r'https://[a-z0-9-]+\.firebaseio\.com',
-        "Stripe Secret": r'sk_live_[0-9a-zA-Z]{24}',
-        "Possible Password": r'(?i)(password|passwd|secret)\s*=\s*[\'"]([^\'"]+)[\'"]'
-    }
+    # JADX XML layouts ko 'res/layout' ya 'resources/res/layout' mein rakhta hai
+    res_layout_path = os.path.join(directory, 'resources', 'res', 'layout')
+    if not os.path.exists(res_layout_path):
+        res_layout_path = os.path.join(directory, 'res', 'layout')
+        
+    if not os.path.exists(res_layout_path):
+        return ["⚠️ Layout folder nahi mila. Shayad app obfuscated hai."]
 
-    for root, dirs, files in os.walk(directory):
+    # Regex jo kisi bhi element (Button, TextView) aur uske ID ko pakrega
+    # Misaal: <Button android:id="@+id/submit_btn" ... />
+    pattern = re.compile(r'<([A-Za-z0-9_.]+)[^>]*?android:id="@\+id/([^"]+)"')
+
+    # Har screen ki layout file ko parho
+    for root, dirs, files in os.walk(res_layout_path):
         for file in files:
-            if file.endswith('.java') or file.endswith('.xml') or file.endswith('.smali'):
+            if file.endswith('.xml'):
                 filepath = os.path.join(root, file)
                 try:
                     with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                         content = f.read()
+                        matches = pattern.findall(content)
                         
-                        # Har pattern ko code mein search karo
-                        for key_name, regex in patterns.items():
-                            matches = re.findall(regex, content)
-                            for match in matches:
-                                if isinstance(match, tuple):
-                                    match = match[1] # For password tuples
-                                secrets_found.add(f"🔴 {key_name}: {match}")
-                                
+                        # Agar is screen par koi IDs hain, toh unko list mein daalo
+                        if matches:
+                            ui_data.append(f"\n📱 [Screen: {file}]")
+                            for tag_name, element_id in matches:
+                                # Appium Automation ke liye Type aur ID
+                                ui_data.append(f"  └─ Element: {tag_name}")
+                                ui_data.append(f"     ➔ ID: {element_id}")
+                                # Automation walay isko aise XPath banate hain:
+                                ui_data.append(f"     ➔ XPath: //{tag_name}[@resource-id='{element_id}']\n")
                 except Exception:
                     pass
                     
-    return list(secrets_found)
+    return ui_data
 
 @bot.message_handler(func=lambda message: message.text and message.text.startswith('http'))
 def handle_apk_link(message):
@@ -62,47 +68,39 @@ def handle_apk_link(message):
         bot.reply_to(message, f"⬇️ Downloading Target App...")
         urllib.request.urlretrieve(url, file_name)
         
-        bot.send_message(CHAT_ID, "🛠️ Dissecting App (Extracting Code)... Please wait.")
+        bot.send_message(CHAT_ID, "🛠️ Decompiling App... Please wait.")
         if os.path.exists(out_dir):
             shutil.rmtree(out_dir)
 
-        # Decompile App
+        # Decompile App with Resources (XML)
         process = subprocess.run(
             ['jadx', '-d', out_dir, file_name], 
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
 
-        if process.returncode != 0:
-            bot.send_message(CHAT_ID, f"❌ Decompilation Failed!")
-            return
+        bot.send_message(CHAT_ID, "👁️ Extracting UI Layouts, XPaths, and Resource IDs...")
+        found_data = extract_ui_elements(out_dir)
 
-        # Start the Scan
-        bot.send_message(CHAT_ID, "👁️ Scanning millions of lines of code for Secrets...")
-        found_data = scan_for_secrets(out_dir)
-
-        # Send Results via Text
-        if not found_data:
-            bot.send_message(CHAT_ID, "⚠️ Koi specific API key ya secret nahi mila. (Developer smart tha!)")
+        # Result Bhejna
+        if len(found_data) <= 1:
+            bot.send_message(CHAT_ID, "⚠️ Koi UI Elements nahi milay.")
         else:
-            result_text = "🔥 **SECRETS FOUND!** 🔥\n\n" + "\n".join(found_data)
+            result_text = "🔥 **APP UI BLUEPRINT EXTRACTED!** 🔥\n" + "\n".join(found_data)
             
-            # Agar text 4000 characters se bada hai (Telegram limit) toh file bana kar bhej do
-            if len(result_text) > 4000:
-                bot.send_message(CHAT_ID, "⚠️ Data bohat zyada hai! Main Text file bhej raha hoon...")
-                with open("secrets_report.txt", "w") as f:
-                    f.write(result_text)
-                with open("secrets_report.txt", "rb") as doc:
-                    bot.send_document(CHAT_ID, doc)
-            else:
-                # Agar chota hai toh direct text message bhej do!
-                bot.send_message(CHAT_ID, result_text)
+            # Text file bana kar bhejo kyunke UI list bohat lambi hogi
+            file_path = "app_ui_locators.txt"
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(result_text)
+                
+            with open(file_path, "rb") as doc:
+                bot.send_document(CHAT_ID, doc, caption="✅ Yeh lein! Saari screens ke UI Elements, IDs, aur XPaths is file mein hain.")
 
     except Exception as e:
         bot.send_message(CHAT_ID, f"❌ Error: {str(e)[:300]}")
         
     finally:
         # Piche koi saboot na chhoro
-        for item in [file_name, out_dir, "secrets_report.txt"]:
+        for item in [file_name, out_dir, "app_ui_locators.txt"]:
             if os.path.exists(item):
                 if os.path.isdir(item): shutil.rmtree(item)
                 else: os.remove(item)
