@@ -81,21 +81,21 @@ def handle_apk_link(message):
             page.goto("https://cloud.jazzdrive.com.pk/#folders", timeout=90000)
             time.sleep(4)
             
-            # 🔥 THE FIX: "#msisdn" use kiya gaya hai direct login box ko target karne ke liye
+            # 🔥 THE FIX: "#msisdn" aur ".last.click()"
             if page.locator("#msisdn").is_visible():
                 bot.send_message(CHAT_ID, "🔑 JazzDrive Login Required! Enter Number (03xxxxxxxxx):")
                 user_context["state"] = "WAITING_FOR_NUMBER"
                 while user_context["state"] != "NUMBER_RECEIVED": time.sleep(1)
                 
                 page.locator("#msisdn").fill(user_context["number"])
-                page.locator('#signinbtn').click()
+                page.locator('#signinbtn').last.click()
                 
                 bot.send_message(CHAT_ID, "🔢 OTP bhejein:")
                 user_context["state"] = "WAITING_FOR_OTP"
                 while user_context["state"] != "OTP_RECEIVED": time.sleep(1)
                 
                 page.evaluate(f'document.getElementById("otp").value = "{user_context["otp"]}"')
-                page.locator('#signinbtn').click()
+                page.locator('#signinbtn').last.click()
                 time.sleep(8)
                 
                 context.storage_state(path="state.json")
